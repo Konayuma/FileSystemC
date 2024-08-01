@@ -259,16 +259,25 @@ void on_write_to_file_clicked(GtkWidget *widget, gpointer data) {
 
 // Function to change to the previous directory
 void on_previous_directory_clicked(GtkWidget *widget, gpointer data) {
-    strcpy(current_directory, previous_directory);
-    update_file_list();
-    update_directory_list();
-    update_current_dir_label();
+    if (history_index > 0) {
+        history_index--;
+        strcpy(current_directory, history_directories[history_index]);
+        update_file_list();
+        update_directory_list();
+        update_current_dir_label();
+    }
 }
 
 // Function to change directory
 void on_change_directory_clicked(GtkWidget *widget, gpointer data) {
     const char *directory = gtk_entry_get_text(GTK_ENTRY(entry_directory));
     char new_directory[MAX_PATH_LENGTH];
+    
+    // Save current directory to history before changing
+    if (history_index < MAX_FILES - 1) {
+        strcpy(history_directories[++history_index], current_directory);
+    }
+    
     if (strcmp(directory, "..") == 0) {
         // Move up one level
         char *last_slash = strrchr(current_directory, '/');
@@ -292,20 +301,18 @@ void on_change_directory_clicked(GtkWidget *widget, gpointer data) {
     update_current_dir_label();
 }
 
-// Function to create a directory
-void on_create_directory_clicked(GtkWidget *widget, gpointer data) {
-    const char *directory = gtk_entry_get_text(GTK_ENTRY(entry_directory));
-    create_file(directory, current_directory);
-    update_file_list();
-    update_directory_list();
-}
-
-// Function to create a file
-void on_create_file_clicked(GtkWidget *widget, gpointer data) {
-    const char *filename = gtk_entry_get_text(GTK_ENTRY(entry_filename));
-    create_file(filename, current_directory);
-    update_file_list();
-    update_directory_list();
+// Function to delete a directory
+void delete_directory(const char *directory) {
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (root_dir[i].inode_number != -1 && strcmp(root_dir[i].parent_directory, directory) == 0) {
+            if (is_directory_empty(root_dir[i].filename) == 0) {
+                gtk_text_buffer_set_text(content_buffer, "Directory is not empty.", -1);
+                return;
+            }
+            delete_directory_entry(i);
+        }
+    }
+    gtk_text_buffer_set_text(content_buffer, "Directory deleted successfully.", -1);
 }
 
 // Function to delete a file or directory
@@ -317,54 +324,77 @@ void on_delete_clicked(GtkWidget *widget, gpointer data) {
         return;
     }
 
+    // Check if it's a directory
     if (is_directory_empty(root_dir[dir_index].filename) == 0) {
-        gtk_text_buffer_set_text(content_buffer, "Directory is not empty.", -1);
-        return;
+        delete_directory(root_dir[dir_index].filename);
+    } else {
+        delete_directory_entry(dir_index);
+        gtk_text_buffer_set_text(content_buffer, "File deleted successfully.", -1);
     }
-
-    delete_directory_entry(dir_index);
-    gtk_text_buffer_set_text(content_buffer, "File or directory deleted successfully.", -1);
     update_file_list();
     update_directory_list();
 }
 
-// Function to update the current directory label
+// Update file list in UI
+void update_file_list() {
+    GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(file_list)));
+    gtk_list_store_clear(store);
+
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (root_dir[i].inode_number != -1 && strcmp(root_dir[i].parent_directory, current_directory) == 0) {
+            GtkTreeIter iter;
+            gtk_list_store_append(store, &iter);
+            gtk_list_store_set(store, &iter, 0, root_dir[i].filename, -1);
+        }
+    }
+}
+
+// Update directory list in UI
+void update_directory_list() {
+    GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(dir_list)));
+    gtk_list_store_clear(store);
+
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (root_dir[i].inode_number != -1 && strcmp(root_dir[i].parent_directory, current_directory) == 0) {
+            GtkTreeIter iter;
+            gtk_list_store_append(store, &iter);
+            gtk_list_store_set(store, &iter, 0, root_dir[i].filename, -1);
+        }
+    }
+}
+
+// Update current directory label
 void update_current_dir_label() {
     gtk_label_set_text(GTK_LABEL(current_dir_label), current_directory);
 }
 
-// Function to update the file list
-void update_file_list() {
-    GtkListStore *list_store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(file_list)));
-    gtk_list_store_clear(list_store);
-
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (root_dir[i].inode_number != -1 && strcmp(root_dir[i].parent_directory, current_directory) == 0) {
-            GtkTreeIter iter;
-            gtk_list_store_append(list_store, &iter);
-            gtk_list_store_set(list_store, &iter, 0, root_dir[i].filename, -1);
-        }
+// Create directory
+void on_create_directory_clicked(GtkWidget *widget, gpointer data) {
+    const char *directory_name = gtk_entry_get_text(GTK_ENTRY(entry_directory));
+    if (create_directory_entry(directory_name, -1, current_directory) != -1) {
+        update_directory_list();
+        gtk_text_buffer_set_text(content_buffer, "Directory created successfully.", -1);
+    } else {
+        gtk_text_buffer_set_text(content_buffer, "Failed to create directory.", -1);
     }
 }
 
-// Function to update the directory list
-void update_directory_list() {
-    GtkListStore *list_store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(dir_list)));
-    gtk_list_store_clear(list_store);
-
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (root_dir[i].inode_number != -1 && strcmp(root_dir[i].parent_directory, current_directory) == 0) {
-            GtkTreeIter iter;
-            gtk_list_store_append(list_store, &iter);
-            gtk_list_store_set(list_store, &iter, 0, root_dir[i].filename, -1);
-        }
+// Create a file
+void on_create_file_clicked(GtkWidget *widget, gpointer data) {
+    const char *filename = gtk_entry_get_text(GTK_ENTRY(entry_filename));
+    if (create_file(filename, current_directory) != -1) {
+        update_file_list();
+        gtk_text_buffer_set_text(content_buffer, "File created successfully.", -1);
+    } else {
+        gtk_text_buffer_set_text(content_buffer, "Failed to create file.", -1);
     }
 }
 
-// Function to handle row activation in the file list
+// Handle file list row activation
 void on_file_list_row_activated(GtkTreeView *tree_view, GtkTreePath *path, GtkTreeViewColumn *column, gpointer data) {
     GtkTreeModel *model = gtk_tree_view_get_model(tree_view);
     GtkTreeIter iter;
+
     if (gtk_tree_model_get_iter(model, &iter, path)) {
         gchar *filename;
         gtk_tree_model_get(model, &iter, 0, &filename, -1);
@@ -373,10 +403,11 @@ void on_file_list_row_activated(GtkTreeView *tree_view, GtkTreePath *path, GtkTr
     }
 }
 
-// Function to handle row activation in the directory list
+// Handle directory list row activation
 void on_dir_list_row_activated(GtkTreeView *tree_view, GtkTreePath *path, GtkTreeViewColumn *column, gpointer data) {
     GtkTreeModel *model = gtk_tree_view_get_model(tree_view);
     GtkTreeIter iter;
+
     if (gtk_tree_model_get_iter(model, &iter, path)) {
         gchar *directory;
         gtk_tree_model_get(model, &iter, 0, &directory, -1);
@@ -392,99 +423,105 @@ int main(int argc, char *argv[]) {
     initialize_fs();
 
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(window), "File System Simulator");
-    gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
+    gtk_window_set_title(GTK_WINDOW(window), "Simple File System");
+    gtk_window_set_default_size(GTK_WINDOW(window), 600, 400);
+
     g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
-    GtkWidget *grid = gtk_grid_new();
-    gtk_container_add(GTK_CONTAINER(window), grid);
-
-    GtkWidget *label = gtk_label_new("Current Directory:");
-    gtk_grid_attach(GTK_GRID(grid), label, 0, 0, 1, 1);
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_container_add(GTK_CONTAINER(window), vbox);
 
     current_dir_label = gtk_label_new(current_directory);
-    gtk_grid_attach(GTK_GRID(grid), current_dir_label, 1, 0, 1, 1);
-
-    GtkWidget *label_filename = gtk_label_new("Filename:");
-    gtk_grid_attach(GTK_GRID(grid), label_filename, 0, 1, 1, 1);
-
-    entry_filename = gtk_entry_new();
-    gtk_grid_attach(GTK_GRID(grid), entry_filename, 1, 1, 1, 1);
-
-    GtkWidget *label_directory = gtk_label_new("Directory:");
-    gtk_grid_attach(GTK_GRID(grid), label_directory, 0, 2, 1, 1);
-
-    entry_directory = gtk_entry_new();
-    gtk_grid_attach(GTK_GRID(grid), entry_directory, 1, 2, 1, 1);
-
-    GtkWidget *create_file_button = gtk_button_new_with_label("Create File");
-    g_signal_connect(create_file_button, "clicked", G_CALLBACK(on_create_file_clicked), NULL);
-    gtk_grid_attach(GTK_GRID(grid), create_file_button, 2, 1, 1, 1);
-
-    GtkWidget *create_directory_button = gtk_button_new_with_label("Create Directory");
-    g_signal_connect(create_directory_button, "clicked", G_CALLBACK(on_create_directory_clicked), NULL);
-    gtk_grid_attach(GTK_GRID(grid), create_directory_button, 2, 2, 1, 1);
-
-    GtkWidget *change_directory_button = gtk_button_new_with_label("Change Directory");
-    g_signal_connect(change_directory_button, "clicked", G_CALLBACK(on_change_directory_clicked), NULL);
-    gtk_grid_attach(GTK_GRID(grid), change_directory_button, 3, 2, 1, 1);
-
-    GtkWidget *previous_directory_button = gtk_button_new_with_label("Previous Directory");
-    g_signal_connect(previous_directory_button, "clicked", G_CALLBACK(on_previous_directory_clicked), NULL);
-    gtk_grid_attach(GTK_GRID(grid), previous_directory_button, 4, 2, 1, 1);
-
-    GtkWidget *delete_button = gtk_button_new_with_label("Delete File/Directory");
-    g_signal_connect(delete_button, "clicked", G_CALLBACK(on_delete_clicked), NULL);
-    gtk_grid_attach(GTK_GRID(grid), delete_button, 5, 1, 1, 1);
-
-    GtkWidget *view_contents_button = gtk_button_new_with_label("View Contents");
-    g_signal_connect(view_contents_button, "clicked", G_CALLBACK(on_view_contents_clicked), NULL);
-    gtk_grid_attach(GTK_GRID(grid), view_contents_button, 5, 2, 1, 1);
-
-    GtkWidget *write_to_file_button = gtk_button_new_with_label("Write to File");
-    g_signal_connect(write_to_file_button, "clicked", G_CALLBACK(on_write_to_file_clicked), NULL);
-    gtk_grid_attach(GTK_GRID(grid), write_to_file_button, 6, 1, 1, 1);
-
-    GtkWidget *file_list_scroll = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(file_list_scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtk_grid_attach(GTK_GRID(grid), file_list_scroll, 0, 3, 4, 1);
+    gtk_box_pack_start(GTK_BOX(vbox), current_dir_label, FALSE, FALSE, 0);
 
     file_list = gtk_tree_view_new();
-    gtk_container_add(GTK_CONTAINER(file_list_scroll), file_list);
-    GtkListStore *file_list_store = gtk_list_store_new(1, G_TYPE_STRING);
-    gtk_tree_view_set_model(GTK_TREE_VIEW(file_list), GTK_TREE_MODEL(file_list_store));
-    GtkCellRenderer *file_renderer = gtk_cell_renderer_text_new();
-    GtkTreeViewColumn *file_column = gtk_tree_view_column_new_with_attributes("Files", file_renderer, "text", 0, NULL);
-    gtk_tree_view_append_column(GTK_TREE_VIEW(file_list), file_column);
+    GtkListStore *file_store = gtk_list_store_new(1, G_TYPE_STRING);
+    gtk_tree_view_set_model(GTK_TREE_VIEW(file_list), GTK_TREE_MODEL(file_store));
+    g_object_unref(file_store);
+    GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+    GtkTreeViewColumn *column = gtk_tree_view_column_new_with_attributes("Files", renderer, "text", 0, NULL);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(file_list), column);
+    gtk_box_pack_start(GTK_BOX(vbox), file_list, TRUE, TRUE, 0);
     g_signal_connect(file_list, "row-activated", G_CALLBACK(on_file_list_row_activated), NULL);
 
-    GtkWidget *dir_list_scroll = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(dir_list_scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtk_grid_attach(GTK_GRID(grid), dir_list_scroll, 4, 3, 4, 1);
-
     dir_list = gtk_tree_view_new();
-    gtk_container_add(GTK_CONTAINER(dir_list_scroll), dir_list);
-    GtkListStore *dir_list_store = gtk_list_store_new(1, G_TYPE_STRING);
-    gtk_tree_view_set_model(GTK_TREE_VIEW(dir_list), GTK_TREE_MODEL(dir_list_store));
-    GtkCellRenderer *dir_renderer = gtk_cell_renderer_text_new();
-    GtkTreeViewColumn *dir_column = gtk_tree_view_column_new_with_attributes("Directories", dir_renderer, "text", 0, NULL);
-    gtk_tree_view_append_column(GTK_TREE_VIEW(dir_list), dir_column);
+    GtkListStore *dir_store = gtk_list_store_new(1, G_TYPE_STRING);
+    gtk_tree_view_set_model(GTK_TREE_VIEW(dir_list), GTK_TREE_MODEL(dir_store));
+    g_object_unref(dir_store);
+    renderer = gtk_cell_renderer_text_new();
+    column = gtk_tree_view_column_new_with_attributes("Directories", renderer, "text", 0, NULL);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(dir_list), column);
+    gtk_box_pack_start(GTK_BOX(vbox), dir_list, TRUE, TRUE, 0);
     g_signal_connect(dir_list, "row-activated", G_CALLBACK(on_dir_list_row_activated), NULL);
 
-    GtkWidget *text_view_scroll = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(text_view_scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtk_grid_attach(GTK_GRID(grid), text_view_scroll, 0, 4, 8, 1);
+    GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_pack_start(GTK_BOX(vbox), hbox, FALSE, FALSE, 0);
 
-    GtkWidget *text_view = gtk_text_view_new();
-    gtk_container_add(GTK_CONTAINER(text_view_scroll), text_view);
-    content_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    GtkWidget *label = gtk_label_new("File:");
+    gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 0);
 
-    update_file_list();
-    update_directory_list();
-    update_current_dir_label();
+    entry_filename = gtk_entry_new();
+    gtk_box_pack_start(GTK_BOX(hbox), entry_filename, TRUE, TRUE, 0);
+
+    GtkWidget *button = gtk_button_new_with_label("Create File");
+    g_signal_connect(button, "clicked", G_CALLBACK(on_create_file_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(hbox), button, FALSE, FALSE, 0);
+
+    button = gtk_button_new_with_label("Delete");
+    g_signal_connect(button, "clicked", G_CALLBACK(on_delete_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(hbox), button, FALSE, FALSE, 0);
+
+    button = gtk_button_new_with_label("View Contents");
+    g_signal_connect(button, "clicked", G_CALLBACK(on_view_contents_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(hbox), button, FALSE, FALSE, 0);
+
+    GtkWidget *hbox2 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_pack_start(GTK_BOX(vbox), hbox2, FALSE, FALSE, 0);
+
+    label = gtk_label_new("Directory:");
+    gtk_box_pack_start(GTK_BOX(hbox2), label, FALSE, FALSE, 0);
+
+    entry_directory = gtk_entry_new();
+    gtk_box_pack_start(GTK_BOX(hbox2), entry_directory, TRUE, TRUE, 0);
+
+    button = gtk_button_new_with_label("Create Directory");
+    g_signal_connect(button, "clicked", G_CALLBACK(on_create_directory_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(hbox2), button, FALSE, FALSE, 0);
+
+    button = gtk_button_new_with_label("Change Directory");
+    g_signal_connect(button, "clicked", G_CALLBACK(on_change_directory_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(hbox2), button, FALSE, FALSE, 0);
+
+    button = gtk_button_new_with_label("Previous Directory");
+    g_signal_connect(button, "clicked", G_CALLBACK(on_previous_directory_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(hbox2), button, FALSE, FALSE, 0);
+
+    GtkWidget *hbox3 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_pack_start(GTK_BOX(vbox), hbox3, FALSE, FALSE, 0);
+
+    GtkWidget *scroll_win = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_win), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_box_pack_start(GTK_BOX(hbox3), scroll_win, TRUE, TRUE, 0);
+
+    content_buffer = gtk_text_buffer_new(NULL);
+    GtkWidget *text_view = gtk_text_view_new_with_buffer(content_buffer);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD);
+    gtk_container_add(GTK_CONTAINER(scroll_win), text_view);
+
+    GtkWidget *write_scroll_win = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(write_scroll_win), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_box_pack_start(GTK_BOX(hbox3), write_scroll_win, TRUE, TRUE, 0);
+
+    write_buffer = gtk_text_buffer_new(NULL);
+    GtkWidget *write_view = gtk_text_view_new_with_buffer(write_buffer);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(write_view), GTK_WRAP_WORD);
+    gtk_container_add(GTK_CONTAINER(write_scroll_win), write_view);
+
+    button = gtk_button_new_with_label("Write to File");
+    g_signal_connect(button, "clicked", G_CALLBACK(on_write_to_file_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(vbox), button, FALSE, FALSE, 0);
 
     gtk_widget_show_all(window);
-
     gtk_main();
 
     return 0;
